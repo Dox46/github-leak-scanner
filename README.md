@@ -1,0 +1,58 @@
+# github-leak-scanner
+
+A command-line tool to scan GitHub repositories for accidentally exposed secrets.
+
+Detects AWS keys, GitHub tokens, private keys, API keys, and more.
+
+## Installation
+```bash
+pip install github-leak-scanner
+```
+
+## Usage
+```bash
+leak-scan https://github.com/user/repo
+```
+
+Export findings to JSON:
+```bash
+leak-scan https://github.com/user/repo --output report.json
+```
+
+## What it detects
+
+| Pattern                   | Severity |
+|---------------------------|----------|
+| AWS Access Key ID         | HIGH     |
+| AWS Secret Access Key     | HIGH     |
+| GitHub Personal Token     | HIGH     |
+| GitHub OAuth Token        | HIGH     |
+| Private Key (RSA/SSH/EC)  | HIGH     |
+| Generic API Key           | MEDIUM   |
+| Generic Password          | MEDIUM   |
+| Generic Token/Secret      | MEDIUM   |
+
+## How it works
+
+1. Clones the target repository into a temporary local directory
+2. Scans every text file using regex pattern matching
+3. Reports findings with file name, line number, and severity
+4. Deletes the temporary directory after scanning
+
+## Limitations
+
+- Scans public repositories only
+- Pattern matching only — no entropy analysis (planned for v2)
+- Does not modify or fix detected secrets
+
+## Development
+```bash
+git clone https://github.com/your-username/github-leak-scanner
+cd github-leak-scanner
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+## License
+
+MIT
