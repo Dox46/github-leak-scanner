@@ -7,17 +7,18 @@ from pathlib import Path
 
 from fetcher import clone_repo
 from scanner import scan_directory
-from reporter import report_to_console, report_to_json
+from reporter import report_to_console, report_to_json, report_to_html
 
 console = Console()
 
 @click.command()
 @click.argument("url")
 @click.option("--output", "-o", default=None, help="Export findings to JSON file")
+@click.option("--html", default=None, help="Export findings to a standalone interactive HTML Dashboard file")
 @click.option("--token", "-t", default=None, help="GitHub Personal Access Token for private repos")
 @click.option("--history", is_flag=True, help="Scan the full git commit history instead of just the latest files")
 @click.option("--debug", is_flag=True, help="Enable debug logging output")
-def main(url: str, output: str | None, token: str | None, history: bool, debug: bool) -> None:
+def main(url: str, output: str | None, html: str | None, token: str | None, history: bool, debug: bool) -> None:
     """
     Scan a GitHub repository for leaked secrets.
 
@@ -67,6 +68,9 @@ def main(url: str, output: str | None, token: str | None, history: bool, debug: 
     
     if output:
         report_to_json(findings, output)
+        
+    if html:
+        report_to_html(findings, url, html)
 
     console.print()
 
