@@ -4,8 +4,10 @@ Takes file content and returns all pattern matches found.
 """
 
 import re
+import concurrent.futures
 from pathlib import Path
 from patterns import PATTERNS
+from entropy import is_high_entropy
 
 # Extensions de fichiers à ignorer (binaires, inutiles)
 IGNORED_EXTENSIONS = {
@@ -45,8 +47,11 @@ def scan_file(file_path: Path) -> list[dict]:
         # Prevent OOM by reading line by line
         with file_path.open("r", encoding="utf-8", errors="ignore") as f:
             for line_number, line in enumerate(f, start=1):
+                # 1. Regex pass
+                regex_matched = False
                 for pattern in PATTERNS:
                     if re.search(pattern["regex"], line):
+                        regex_matched = True
                         findings.append({
                             "file": str(file_path),
                             "line": line_number,
@@ -54,6 +59,21 @@ def scan_file(file_path: Path) -> list[dict]:
                             "severity": pattern["severity"],
                             "content": line.strip()[:120],  # max 120 chars pour sécurité
                         })
+                
+                # 2. Heuristic pass (Entropy) - only if no format matched to avoid duplicates
+                if not regex_matched:
+                    # Split line into words and evaluate long standalone sequences
+                    words = re.findall(r'\S+', line)
+                    for word in words:
+                        if is_high_entropy(word, threshold=4.5, min_length=16):
+                            findings.append({
+                                "file": str(file_path),
+                                "line": line_number,
+                                "pattern": "High Entropy String",
+                                "severity": "MEDIUM",
+                                "content": word[:120],
+                            })
+                            break # Limit to 1 generic entropy finding per line to avoid spam
     except Exception as e:
         # Log or print error ideally. For now, we skip safely without crashing.
         # print(f"Warning: Failed to read {file_path}: {e}")
@@ -64,14 +84,15 @@ def scan_file(file_path: Path) -> list[dict]:
 
 def scan_directory(directory: Path) -> list[dict]:
     """
-    Recursively scan all files in a directory.
+    Recursively scan all files in a directory using multiprocessing.
     Returns all findings sorted by severity.
     """
     all_findings = []
+    files_to_scan = []
 
     for file_path in directory.rglob("*"):
         if file_path.is_file():
-            # Check for .env files directly by filename
+            # Check for .env files directly by filename synchronously
             if file_path.name == ".env" or file_path.suffix == ".env":
                 all_findings.append({
                     "file": str(file_path),
@@ -81,8 +102,16 @@ def scan_directory(directory: Path) -> list[dict]:
                     "content": "File name match",
                 })
             
-            # Scan the contents of the file
-            all_findings.extend(scan_file(file_path))
+            # Queue files for content scanning
+            files_to_scan.append(file_path)
+
+    # Parallelize file scanning
+    if files_to_scan:
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            # Map returns results in the same order as files_to_scan
+            results = executor.map(scan_file, files_to_scan)
+            for file_findings in results:
+                all_findings.extend(file_findings)
 
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     all_findings.sort(key=lambda x: severity_order.get(x["severity"], 99))
