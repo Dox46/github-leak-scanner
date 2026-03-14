@@ -14,17 +14,28 @@ def validate_github_url(url: str) -> None:
     if len(parts) < 5:
         raise ValueError("URL must point to a repository: https://github.com/user/repo")
 
-def clone_repo(url: str, target_dir: Path) -> str:
+def clone_repo(url: str, target_dir: Path, token: str | None = None, history: bool = False) -> str:
     """
     Clone a GitHub repo to a given target directory.
+    If 'token' is provided, it uses it for private repo authentication.
+    If 'history' is True, it fetches the full git history instead of a shallow clone.
     Returns the repository name.
     Raises ValueError on failure.
     """
     validate_github_url(url)
     repo_name = url.rstrip("/").split("/")[-1].replace(".git", "")
 
+    clone_url = url
+    if token:
+        # Inject the token into the URL payload
+        clone_url = url.replace("https://", f"https://x-access-token:{token}@")
+
     try:
-        Repo.clone_from(url, target_dir, depth=1)  # depth=1 = faster
+        if history:
+            Repo.clone_from(clone_url, target_dir)
+        else:
+            Repo.clone_from(clone_url, target_dir, depth=1)  # fast shallow clone
         return repo_name
-    except GitCommandError as e:
-        raise ValueError(f"Could not clone repository. Check the URL and try again.") from e
+    except GitCommandError:
+        # We catch and raise a sanitized message so we don't leak the token in the stack trace
+        raise ValueError("Could not clone repository. Check the URL, permissions, and try again.")

@@ -1,5 +1,6 @@
 # github-leak-scanner
 
+[![CI](https://github.com/Dox46/github-leak-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/Dox46/github-leak-scanner/actions/workflows/ci.yml)
 A command-line tool to scan GitHub repositories for accidentally exposed secrets.
 
 Detects AWS keys, GitHub tokens, private keys, API keys, and more.

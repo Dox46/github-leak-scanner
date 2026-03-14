@@ -12,7 +12,9 @@ console = Console()
 @click.command()
 @click.argument("url")
 @click.option("--output", "-o", default=None, help="Export findings to JSON file")
-def main(url: str, output: str | None):
+@click.option("--token", "-t", default=None, help="GitHub Personal Access Token for private repos")
+@click.option("--history", is_flag=True, help="Scan the full git commit history instead of just the latest files")
+def main(url: str, output: str | None, token: str | None, history: bool):
     """
     Scan a GitHub repository for leaked secrets.
 
@@ -30,13 +32,17 @@ def main(url: str, output: str | None):
         with console.status("[bold yellow]Cloning repository...[/bold yellow]"):
             try:
                 # The fetcher must clone INTO the existing temp_dir
-                repo_name = clone_repo(url, temp_dir)
+                repo_name = clone_repo(url, temp_dir, token=token, history=history)
             except ValueError as e:
                 console.print(f"[bold red]Error:[/bold red] {e}")
                 raise SystemExit(1)
 
         with console.status("[bold yellow]Scanning files...[/bold yellow]"):
-            findings = scan_directory(temp_dir)
+            if history:
+                from scanner import scan_git_history
+                findings = scan_git_history(temp_dir)
+            else:
+                findings = scan_directory(temp_dir)
 
     # Reporting phase
     report_to_console(findings)
