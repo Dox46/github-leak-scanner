@@ -9,6 +9,13 @@ Detects AWS keys, GitHub tokens, private keys, API keys, and more.
 pip install github-leak-scanner
 ```
 
+## Key Features
+
+- **Blazing Fast**: Uses Native Python Multiprocessing (`ProcessPoolExecutor`) to scan repositories on all available CPU cores.
+- **Heuristic Detection**: Uses Shannon Entropy analysis to catch unknown high-entropy secrets and tokens that bypass standard regex.
+- **Fail-Fast Validation**: Instantly validates GitHub URLs to prevent redundant network requests.
+- **JSON Export**: Export detailed security findings for CI/CD pipelines.
+
 ## Usage
 ```bash
 leak-scan https://github.com/user/repo
@@ -31,18 +38,21 @@ leak-scan https://github.com/user/repo --output report.json
 | Generic API Key           | MEDIUM   |
 | Generic Password          | MEDIUM   |
 | Generic Token/Secret      | MEDIUM   |
+| High Entropy String       | MEDIUM   |
 
 ## How it works
 
-1. Clones the target repository into a temporary local directory
-2. Scans every text file using regex pattern matching
-3. Reports findings with file name, line number, and severity
-4. Deletes the temporary directory after scanning
+1. Validates the GitHub URL for correctness
+2. Clones the target repository into an isolated temporary directory
+3. Distributes the files across a Multiprocessing Pool for concurrent scanning
+4. Scans every file using Regex pattern matching
+5. Falls back to Shannon Entropy analysis on long unrecognised words
+6. Reports findings with file name, line number, and severity
+7. Automatically cleans up the temporary directory securely
 
 ## Limitations
 
 - Scans public repositories only
-- Pattern matching only — no entropy analysis (planned for v2)
 - Does not modify or fix detected secrets
 
 ## Development
