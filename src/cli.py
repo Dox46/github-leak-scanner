@@ -1,6 +1,8 @@
 import click
 import tempfile
+import logging
 from rich.console import Console
+from rich.logging import RichHandler
 from pathlib import Path
 
 from fetcher import clone_repo
@@ -14,13 +16,25 @@ console = Console()
 @click.option("--output", "-o", default=None, help="Export findings to JSON file")
 @click.option("--token", "-t", default=None, help="GitHub Personal Access Token for private repos")
 @click.option("--history", is_flag=True, help="Scan the full git commit history instead of just the latest files")
-def main(url: str, output: str | None, token: str | None, history: bool):
+@click.option("--debug", is_flag=True, help="Enable debug logging output")
+def main(url: str, output: str | None, token: str | None, history: bool, debug: bool) -> None:
     """
     Scan a GitHub repository for leaked secrets.
 
     Usage: leak-scan https://github.com/user/repo
     """
+    # Configure logging
+    log_level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True, console=console, show_path=False)]
+    )
+    logger = logging.getLogger("leak-scanner")
+
     console.print(f"\n[bold cyan]GitHub Leak Scanner[/bold cyan]")
+    logger.debug(f"Starting scan for {url} (History: {history})")
     console.print(f"[dim]Scanning:[/dim] {url}\n")
     
     findings = []
@@ -32,16 +46,20 @@ def main(url: str, output: str | None, token: str | None, history: bool):
         with console.status("[bold yellow]Cloning repository...[/bold yellow]"):
             try:
                 # The fetcher must clone INTO the existing temp_dir
+                logger.debug("Calling fetcher to clone repository")
                 repo_name = clone_repo(url, temp_dir, token=token, history=history)
             except ValueError as e:
+                logger.error(f"Clone failed: {e}")
                 console.print(f"[bold red]Error:[/bold red] {e}")
                 raise SystemExit(1)
 
         with console.status("[bold yellow]Scanning files...[/bold yellow]"):
             if history:
+                logger.debug("History mode enabled, invoking scan_git_history")
                 from scanner import scan_git_history
                 findings = scan_git_history(temp_dir)
             else:
+                logger.debug("Invoking scan_directory")
                 findings = scan_directory(temp_dir)
 
     # Reporting phase

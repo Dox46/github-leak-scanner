@@ -28,7 +28,7 @@ class TestScanFile:
         f.write_text('aws_key = "AKIAIOSFODNN7EXAMPLE"')
         findings = scan_file(f)
         assert len(findings) >= 1
-        assert any(finding["severity"] == "HIGH" for finding in findings)
+        assert any(finding.severity == "HIGH" for finding in findings)
 
     def test_clean_file_returns_empty(self, tmp_path):
         f = tmp_path / "clean.py"
@@ -42,10 +42,10 @@ class TestScanFile:
         findings = scan_file(f)
         assert len(findings) > 0
         finding = findings[0]
-        assert "file" in finding
-        assert "line" in finding
-        assert "pattern" in finding
-        assert "severity" in finding
+        assert hasattr(finding, "file")
+        assert hasattr(finding, "line")
+        assert hasattr(finding, "pattern")
+        assert hasattr(finding, "severity")
 
 
 class TestScanDirectory:
@@ -59,6 +59,6 @@ class TestScanDirectory:
         (tmp_path / "high.py").write_text("AKIAIOSFODNN7EXAMPLE")
         (tmp_path / "medium.py").write_text('api_key = "abcdefghij1234567890"')
         findings = scan_directory(tmp_path)
-        severities = [f["severity"] for f in findings]
+        severities = [f.severity for f in findings]
         order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         assert severities == sorted(severities, key=lambda s: order.get(s, 99))

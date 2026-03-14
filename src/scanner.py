@@ -5,10 +5,15 @@ Takes file content and returns all pattern matches found.
 
 import re
 import git
+import logging
 import concurrent.futures
 from pathlib import Path
+from typing import List, Literal, cast
 from patterns import PATTERNS
 from entropy import is_high_entropy
+from models import Finding
+
+logger = logging.getLogger("leak-scanner")
 
 # Extensions de fichiers à ignorer (binaires, inutiles)
 IGNORED_EXTENSIONS = {
@@ -34,12 +39,12 @@ def should_skip(file_path: Path) -> bool:
     return False
 
 
-def scan_file(file_path: Path) -> list[dict]:
+def scan_file(file_path: Path) -> List[Finding]:
     """
     Scan a single file for secret patterns.
     Returns a list of findings.
     """
-    findings = []
+    findings: List[Finding] = []
 
     if should_skip(file_path):
         return findings
@@ -53,13 +58,13 @@ def scan_file(file_path: Path) -> list[dict]:
                 for pattern in PATTERNS:
                     if re.search(pattern["regex"], line):
                         regex_matched = True
-                        findings.append({
-                            "file": str(file_path),
-                            "line": line_number,
-                            "pattern": pattern["name"],
-                            "severity": pattern["severity"],
-                            "content": line.strip()[:120],  # max 120 chars pour sécurité
-                        })
+                        findings.append(Finding(
+                            file=str(file_path),
+                            line=line_number,
+                            pattern=pattern["name"],
+                            severity=cast(Literal["HIGH", "MEDIUM", "LOW"], pattern["severity"]),
+                            content=line.strip()[:120],  # max 120 chars pour sécurité
+                        ))
                 
                 # 2. Heuristic pass (Entropy) - only if no format matched to avoid duplicates
                 if not regex_matched:
@@ -67,41 +72,39 @@ def scan_file(file_path: Path) -> list[dict]:
                     words = re.findall(r'\S+', line)
                     for word in words:
                         if is_high_entropy(word, threshold=4.5, min_length=16):
-                            findings.append({
-                                "file": str(file_path),
-                                "line": line_number,
-                                "pattern": "High Entropy String",
-                                "severity": "MEDIUM",
-                                "content": word[:120],
-                            })
+                            findings.append(Finding(
+                                file=str(file_path),
+                                line=line_number,
+                                pattern="High Entropy String",
+                                severity="MEDIUM",
+                                content=word[:120],
+                            ))
                             break # Limit to 1 generic entropy finding per line to avoid spam
     except Exception as e:
-        # Log or print error ideally. For now, we skip safely without crashing.
-        # print(f"Warning: Failed to read {file_path}: {e}")
-        pass
+        logger.debug(f"Skipping unreadable file {file_path}: {e}")
 
     return findings
 
 
-def scan_directory(directory: Path) -> list[dict]:
+def scan_directory(directory: Path) -> List[Finding]:
     """
     Recursively scan all files in a directory using multiprocessing.
     Returns all findings sorted by severity.
     """
-    all_findings = []
+    all_findings: List[Finding] = []
     files_to_scan = []
 
     for file_path in directory.rglob("*"):
         if file_path.is_file():
             # Check for .env files directly by filename synchronously
             if file_path.name == ".env" or file_path.suffix == ".env":
-                all_findings.append({
-                    "file": str(file_path),
-                    "line": 0,
-                    "pattern": ".env file detected",
-                    "severity": "LOW",
-                    "content": "File name match",
-                })
+                all_findings.append(Finding(
+                    file=str(file_path),
+                    line=0,
+                    pattern=".env file detected",
+                    severity="LOW",
+                    content="File name match",
+                ))
             
             # Queue files for content scanning
             files_to_scan.append(file_path)
@@ -115,28 +118,31 @@ def scan_directory(directory: Path) -> list[dict]:
                 all_findings.extend(file_findings)
 
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    all_findings.sort(key=lambda x: severity_order.get(x["severity"], 99))
+    all_findings.sort(key=lambda x: severity_order.get(x.severity, 99))
 
     return all_findings
 
 
-def scan_git_history(directory: Path) -> list[dict]:
+def scan_git_history(directory: Path) -> List[Finding]:
     """
     Scan the entire Git commit history via git log diffs.
     Only scans added lines (+) in the diffs to avoid duplicate alerts 
     on context lines or removed lines.
     """
-    all_findings = []
+    all_findings: List[Finding] = []
     
     try:
         repo = git.Repo(directory)
     except git.exc.InvalidGitRepositoryError:
+        logger.debug(f"Invalid git repository at {directory}")
         return []
         
     try:
         # Fetch the entire git patch history efficiently
+        logger.debug("Executing git log -p --all")
         log_output = repo.git.log('-p', '--all')
-    except git.exc.GitCommandError:
+    except git.exc.GitCommandError as e:
+        logger.debug(f"Git command error: {e}")
         return []
         
     current_commit = "unknown"
@@ -160,29 +166,29 @@ def scan_git_history(directory: Path) -> list[dict]:
             for pattern in PATTERNS:
                 if re.search(pattern["regex"], added_text):
                     regex_matched = True
-                    all_findings.append({
-                        "file": str(current_file),
-                        "line": f"commit:{current_commit}",
-                        "pattern": pattern["name"],
-                        "severity": pattern["severity"],
-                        "content": added_text.strip()[:120],
-                    })
+                    all_findings.append(Finding(
+                        file=str(current_file),
+                        line=f"commit:{current_commit}",
+                        pattern=pattern["name"],
+                        severity=cast(Literal["HIGH", "MEDIUM", "LOW"], pattern["severity"]),
+                        content=added_text.strip()[:120],
+                    ))
                     
             # 2. Heuristic Pass
             if not regex_matched:
                 words = re.findall(r'\S+', added_text)
                 for word in words:
                     if is_high_entropy(word, threshold=4.5, min_length=16):
-                        all_findings.append({
-                            "file": str(current_file),
-                            "line": f"commit:{current_commit}",
-                            "pattern": "High Entropy String",
-                            "severity": "MEDIUM",
-                            "content": word[:120],
-                        })
+                        all_findings.append(Finding(
+                            file=str(current_file),
+                            line=f"commit:{current_commit}",
+                            pattern="High Entropy String",
+                            severity="MEDIUM",
+                            content=word[:120],
+                        ))
                         break
                         
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    all_findings.sort(key=lambda x: severity_order.get(x["severity"], 99))
+    all_findings.sort(key=lambda x: severity_order.get(x.severity, 99))
 
     return all_findings
