@@ -18,10 +18,8 @@ def test_build_html_report_contains_kpis_and_data():
     assert "https://github.com/Fake/Repo" in html
     assert "Total Leaks Detected" in html
     
-    # Check KPIs
-    assert 'text-red-500">1</p>' in html
-    assert 'text-yellow-500">1</p>' in html
-    assert 'text-blue-400">1</p>' in html
+    # Check KPIs format (text-6xl font-black text-white)
+    assert html.count('text-6xl font-black text-white">1</p>') == 3
     
     # Check Pydantic injects strings safely
     assert 'AWS Access Key ID' in html

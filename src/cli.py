@@ -62,6 +62,14 @@ def main(url: str, output: str | None, html: str | None, token: str | None, hist
             else:
                 logger.debug("Invoking scan_directory")
                 findings = scan_directory(temp_dir)
+                
+            # Normalize absolute paths down to relative repo-root formats
+            for f in findings:
+                try:
+                    rel_path = Path(f.file).relative_to(temp_dir)
+                    f.file = str(rel_path).replace('\\\\', '/')
+                except ValueError:
+                    pass
 
     # Reporting phase
     report_to_console(findings)
