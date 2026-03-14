@@ -27,6 +27,16 @@ Export findings to JSON:
 leak-scan https://github.com/user/repo --output report.json
 ```
 
+Scan a Private Repository (Token is never printed to logs):
+```bash
+leak-scan https://github.com/user/repo --token "github_pat_XXXXXXX"
+```
+
+Scan the entire Git Commit History (Deep Scan):
+```bash
+leak-scan https://github.com/user/repo --history
+```
+
 ## What it detects
 
 | Pattern                   | Severity |
@@ -53,7 +63,6 @@ leak-scan https://github.com/user/repo --output report.json
 
 ## Limitations
 
-- Scans public repositories only
 - Does not modify or fix detected secrets
 
 ## Development
