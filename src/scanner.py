@@ -42,20 +42,22 @@ def scan_file(file_path: Path) -> list[dict]:
         return findings
 
     try:
-        content = file_path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
-        return findings
-
-    for line_number, line in enumerate(content.splitlines(), start=1):
-        for pattern in PATTERNS:
-            if re.search(pattern["regex"], line):
-                findings.append({
-                    "file": str(file_path),
-                    "line": line_number,
-                    "pattern": pattern["name"],
-                    "severity": pattern["severity"],
-                    "content": line.strip()[:120],  # max 120 chars pour sécurité
-                })
+        # Prevent OOM by reading line by line
+        with file_path.open("r", encoding="utf-8", errors="ignore") as f:
+            for line_number, line in enumerate(f, start=1):
+                for pattern in PATTERNS:
+                    if re.search(pattern["regex"], line):
+                        findings.append({
+                            "file": str(file_path),
+                            "line": line_number,
+                            "pattern": pattern["name"],
+                            "severity": pattern["severity"],
+                            "content": line.strip()[:120],  # max 120 chars pour sécurité
+                        })
+    except Exception as e:
+        # Log or print error ideally. For now, we skip safely without crashing.
+        # print(f"Warning: Failed to read {file_path}: {e}")
+        pass
 
     return findings
 
@@ -69,6 +71,17 @@ def scan_directory(directory: Path) -> list[dict]:
 
     for file_path in directory.rglob("*"):
         if file_path.is_file():
+            # Check for .env files directly by filename
+            if file_path.name == ".env" or file_path.suffix == ".env":
+                all_findings.append({
+                    "file": str(file_path),
+                    "line": 0,
+                    "pattern": ".env file detected",
+                    "severity": "LOW",
+                    "content": "File name match",
+                })
+            
+            # Scan the contents of the file
             all_findings.extend(scan_file(file_path))
 
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}

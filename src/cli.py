@@ -1,17 +1,13 @@
-"""
-CLI entry point using Click.
-"""
-
 import click
+import tempfile
 from rich.console import Console
-from rich.table import Table
 from pathlib import Path
 
-from fetcher import clone_repo, cleanup
+from fetcher import clone_repo
 from scanner import scan_directory
+from reporter import report_to_console, report_to_json
 
 console = Console()
-
 
 @click.command()
 @click.argument("url")
@@ -24,47 +20,28 @@ def main(url: str, output: str | None):
     """
     console.print(f"\n[bold cyan]GitHub Leak Scanner[/bold cyan]")
     console.print(f"[dim]Scanning:[/dim] {url}\n")
+    
+    findings = []
+    
+    # Using tempfile context manager to ensure guaranteed cleanup
+    with tempfile.TemporaryDirectory(prefix="leak_scan_") as temp_dir_str:
+        temp_dir = Path(temp_dir_str)
+        
+        with console.status("[bold yellow]Cloning repository...[/bold yellow]"):
+            try:
+                # The fetcher must clone INTO the existing temp_dir
+                repo_name = clone_repo(url, temp_dir)
+            except ValueError as e:
+                console.print(f"[bold red]Error:[/bold red] {e}")
+                raise SystemExit(1)
 
-    with console.status("[bold yellow]Cloning repository...[/bold yellow]"):
-        try:
-            temp_dir, repo_name = clone_repo(url)
-        except ValueError as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-            raise SystemExit(1)
+        with console.status("[bold yellow]Scanning files...[/bold yellow]"):
+            findings = scan_directory(temp_dir)
 
-    with console.status("[bold yellow]Scanning files...[/bold yellow]"):
-        findings = scan_directory(temp_dir)
-
-    cleanup(temp_dir)
-
-    if not findings:
-        console.print("[bold green]No secrets found.[/bold green]\n")
-        return
-
-    console.print(f"[bold red]{len(findings)} finding(s) detected:[/bold red]\n")
-
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Severity", style="bold", width=8)
-    table.add_column("Pattern", width=28)
-    table.add_column("File", width=35)
-    table.add_column("Line", width=5)
-
-    severity_colors = {"HIGH": "red", "MEDIUM": "yellow", "LOW": "cyan"}
-
-    for f in findings:
-        color = severity_colors.get(f["severity"], "white")
-        table.add_row(
-            f"[{color}]{f['severity']}[/{color}]",
-            f["pattern"],
-            Path(f["file"]).name,
-            str(f["line"]),
-        )
-
-    console.print(table)
-
+    # Reporting phase
+    report_to_console(findings)
+    
     if output:
-        import json
-        Path(output).write_text(json.dumps(findings, indent=2))
-        console.print(f"\n[green]Report saved to {output}[/green]")
+        report_to_json(findings, output)
 
     console.print()

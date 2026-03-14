@@ -44,9 +44,4 @@ PATTERNS = [
         "regex": r"(?i)(token|secret)\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{16,})['\"]?",
         "severity": "MEDIUM",
     },
-    {
-        "name": ".env file detected",
-        "regex": r"^\.env$",
-        "severity": "LOW",
-    },
 ]
