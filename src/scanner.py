@@ -14,6 +14,8 @@ from typing import List, Literal, cast
 from entropy import is_high_entropy
 from models import Finding
 from yara_engine import scan_file_with_yara
+from validator import enrich_with_verification
+import fnmatch
 
 logger = logging.getLogger("leak-scanner")
 
@@ -51,29 +53,46 @@ def scan_file(file_path: Path) -> List[Finding]:
     if should_skip(file_path):
         return findings
         
-    yara_findings = scan_file_with_yara(file_path)
-    findings.extend(yara_findings)
-    yara_lines = {f.line for f in yara_findings if isinstance(f.line, int)}
+    yara_findings_raw = scan_file_with_yara(file_path)
+    
+    yara_lines_dict = {}
+    for f in yara_findings_raw:
+        if isinstance(f.line, int):
+            yara_lines_dict.setdefault(f.line, []).append(f)
 
     try:
-        # Prevent OOM by reading line by line for the Entropy fallback
+        # 1-pass read to simultaneously check leak-ignore and apply entropy
         with file_path.open("r", encoding="utf-8", errors="ignore") as f:
             for line_number, line in enumerate(f, start=1):
-                # Only apply entropy analysis if YARA didn't flag the line
-                if line_number not in yara_lines:
-                    words = re.findall(r'\S+', line)
-                    for word in words:
-                        if is_high_entropy(word, threshold=4.5, min_length=16):
-                            findings.append(Finding(
-                                file=str(file_path),
-                                line=line_number,
-                                pattern="High Entropy String",
-                                severity="MEDIUM",
-                                content=word[:120],
-                            ))
-                            break # Limit to 1 generic entropy finding per line
+                
+                # Check for inline ignore flag
+                if "leak-ignore" in line:
+                    continue
+                    
+                # If YARA flagged this line, we keep the YARA findings
+                if line_number in yara_lines_dict:
+                    findings.extend(yara_lines_dict[line_number])
+                    continue
+                    
+                # Otherwise, fallback to entropy analysis
+                words = re.findall(r'\S+', line)
+                for word in words:
+                    if is_high_entropy(word, threshold=4.5, min_length=16):
+                        findings.append(Finding(
+                            file=str(file_path),
+                            line=line_number,
+                            pattern="High Entropy String",
+                            severity="MEDIUM",
+                            content=word[:120],
+                        ))
+                        break # Limit to 1 generic entropy finding per line
+                        
     except Exception as e:
         logger.debug(f"Skipping unreadable file {file_path}: {e}")
+
+    # Active Validation Pass
+    for f in findings:
+        f.verified = enrich_with_verification(f.pattern, f.content)
 
     return findings
 
@@ -86,8 +105,31 @@ def scan_directory(directory: Path) -> List[Finding]:
     all_findings: List[Finding] = []
     files_to_scan = []
 
+    leakignore_path = directory / ".leakignore"
+    ignored_patterns = []
+    if leakignore_path.exists():
+        try:
+            ignored_patterns = [line.strip() for line in leakignore_path.read_text("utf-8").splitlines() if line.strip() and not line.startswith("#")]
+        except Exception as e:
+            logger.debug(f"Failed to read .leakignore: {e}")
+
     for file_path in directory.rglob("*"):
         if file_path.is_file():
+            
+            # Sub-path relative to repo root for ignore matching
+            try:
+                rel_path_str = str(file_path.relative_to(directory)).replace('\\\\', '/')
+                skip = False
+                for pat in ignored_patterns:
+                    # Very basic fnmatch support for .leakignore lines
+                    if fnmatch.fnmatch(rel_path_str, pat) or fnmatch.fnmatch(rel_path_str, f"*/{pat}") or fnmatch.fnmatch(rel_path_str, f"{pat}/*"):
+                        skip = True
+                        break
+                if skip:
+                    continue
+            except ValueError:
+                pass
+            
             # Check for .env files directly by filename synchronously
             if file_path.name == ".env" or file_path.suffix == ".env":
                 all_findings.append(Finding(
@@ -162,41 +204,53 @@ def scan_git_history(directory: Path) -> List[Finding]:
                 current_temp_line += 1
                 
     # Batch process the temp file through YARA
-    yara_findings = scan_file_with_yara(tmp_path)
-    yara_matched_lines = set()
+    yara_findings_raw = scan_file_with_yara(tmp_path)
+    yara_lines_dict = {}
+    for yf in yara_findings_raw:
+        if isinstance(yf.line, int):
+            yara_lines_dict.setdefault(yf.line, []).append(yf)
+            
+    valid_findings = []
     
-    for yf in yara_findings:
-        commit_sha, src_file = line_mapping.get(yf.line, ("unknown", "unknown"))
-        all_findings.append(Finding(
-            file=str(src_file),
-            line=f"commit:{commit_sha}",
-            pattern=yf.pattern,
-            severity=yf.severity,
-            content=yf.content,
-        ))
-        yara_matched_lines.add(yf.line)
-        
-    # Heuristic Pass (Entropy) for un-matched lines
+    # 1-pass read for ignore flag and entropy
     try:
         with tmp_path.open("r", encoding="utf-8", errors="ignore") as tmp:
             for i, line_content in enumerate(tmp, start=1):
-                if i not in yara_matched_lines:
-                    words = re.findall(r'\\S+', line_content)
-                    for word in words:
-                        if is_high_entropy(word, threshold=4.5, min_length=16):
-                            commit_sha, src_file = line_mapping.get(i, ("unknown", "unknown"))
-                            all_findings.append(Finding(
-                                file=str(src_file),
-                                line=f"commit:{commit_sha}",
-                                pattern="High Entropy String",
-                                severity="MEDIUM",
-                                content=word[:120],
-                            ))
-                            break
+                if "leak-ignore" in line_content:
+                    continue
+                    
+                if i in yara_lines_dict:
+                    commit_sha, src_file = line_mapping.get(i, ("unknown", "unknown"))
+                    for yf in yara_lines_dict[i]:
+                        valid_findings.append(Finding(
+                            file=str(src_file),
+                            line=f"commit:{commit_sha}",
+                            pattern=yf.pattern,
+                            severity=yf.severity,
+                            content=yf.content,
+                        ))
+                    continue
+                    
+                words = re.findall(r'\S+', line_content)
+                for word in words:
+                    if is_high_entropy(word, threshold=4.5, min_length=16):
+                        commit_sha, src_file = line_mapping.get(i, ("unknown", "unknown"))
+                        valid_findings.append(Finding(
+                            file=str(src_file),
+                            line=f"commit:{commit_sha}",
+                            pattern="High Entropy String",
+                            severity="MEDIUM",
+                            content=word[:120],
+                        ))
+                        break
     finally:
         tmp_path.unlink(missing_ok=True)
                         
+    # Active Validation Pass
+    for f in valid_findings:
+        f.verified = enrich_with_verification(f.pattern, f.content)
+        
     severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    all_findings.sort(key=lambda x: severity_order.get(x.severity, 99))
+    valid_findings.sort(key=lambda x: severity_order.get(x.severity, 99))
 
-    return all_findings
+    return valid_findings

@@ -1,0 +1,51 @@
+name: 'GitHub Leak Scanner'
+description: 'High-performance YARA-based secret scanner to detect credentials in your repository'
+author: 'Dox46'
+
+inputs:
+  target:
+    description: 'The URL or local path of the repository to scan.'
+    required: false
+    default: '.'
+  history:
+    description: 'Set to "true" to scan the full git commit history rather than just the latest files.'
+    required: false
+    default: 'false'
+  token:
+    description: 'GitHub Personal Access Token for private repositories.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Clone Scanner Engine
+      run: git clone https://github.com/Dox46/github-leak-scanner.git /tmp/leak-scanner-engine
+      shell: bash
+      
+    - name: Install Dependencies
+      run: |
+        cd /tmp/leak-scanner-engine
+        pip install requests boto3 click rich pydantic GitPython
+      shell: bash
+      
+    - name: Run GitHub Leak Scanner
+      run: |
+        echo "Executing GitHub Leak Scanner 🚀"
+        CMD="python /tmp/leak-scanner-engine/src/cli.py ${{ inputs.target }}"
+        
+        if [ "${{ inputs.history }}" = "true" ]; then
+          CMD="$CMD --history"
+        fi
+        
+        if [ -n "${{ inputs.token }}" ]; then
+          CMD="$CMD -t ${{ inputs.token }}"
+        fi
+        
+        $CMD
+      shell: bash

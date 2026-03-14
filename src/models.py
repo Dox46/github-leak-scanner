@@ -11,3 +11,4 @@ class Finding(BaseModel):
     pattern: str
     severity: Literal["HIGH", "MEDIUM", "LOW"]
     content: str = Field(max_length=150)
+    verified: Literal["True", "False", "Unknown"] = "Unknown"
