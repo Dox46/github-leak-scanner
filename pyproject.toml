@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-leak-scanner"
+version = "0.1.0"
+description = "Scan GitHub repos for accidentally exposed secrets"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1",
+    "gitpython>=3.1",
+    "rich>=13.0",
+]
+
+[project.scripts]
+leak-scan = "cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+[tool.pytest.ini_options]
+pythonpath = ["."]
