@@ -62,3 +62,40 @@ class TestScanDirectory:
         severities = [f.severity for f in findings]
         order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
         assert severities == sorted(severities, key=lambda s: order.get(s, 99))
+
+
+class TestGitHistory:
+    def test_deleted_secret_found_in_history(self, tmp_path):
+        import git
+        from src.scanner import scan_git_history
+        
+        # Create a local Git repository and set dummy author
+        repo = git.Repo.init(tmp_path)
+        with repo.config_writer() as git_config:
+            git_config.set_value('user', 'email', 'test@example.com')
+            git_config.set_value('user', 'name', 'Test User')
+        
+        # Create a file with a secret
+        secret_file = tmp_path / "config.py"
+        secret_file.write_text('token = "ghp_' + 'A' * 36 + '"')
+        repo.index.add(["config.py"])
+        repo.index.commit("Add secret token")
+        
+        # Remove the secret in a new commit
+        secret_file.write_text('token = "REMOVED"')
+        repo.index.add(["config.py"])
+        repo.index.commit("Remove secret")
+        
+        # Scan the history
+        findings = scan_git_history(tmp_path)
+        
+        # If it fails, print the git log for debugging
+        if not any(f.pattern == "GitHub Personal Token" for f in findings):
+            print("GIT LOG OUTPUT:")
+            print(repo.git.log('-p', '--all'))
+            print("FINDINGS:", findings)
+            
+        # The secret should still exist in the log patch
+        assert len(findings) >= 1
+        assert any(f.pattern == "GitHub Personal Access Token" for f in findings)
+        assert any("commit:" in str(f.line) for f in findings)

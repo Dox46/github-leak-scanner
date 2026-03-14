@@ -69,3 +69,6 @@ def main(url: str, output: str | None, token: str | None, history: bool, debug: 
         report_to_json(findings, output)
 
     console.print()
+
+if __name__ == "__main__":
+    main()

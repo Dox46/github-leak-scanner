@@ -23,3 +23,13 @@ class TestEntropy:
     def test_empty_string(self):
         assert shannon_entropy("") == 0.0
         assert not is_high_entropy("")
+
+    def test_entropy_requires_mixed_classes(self):
+        # A long natural sentence has high entropy but no numbers/special chars mixed
+        natural_phrase = "Ceci est une longue phrase en francais tres normale sans aucun secret"
+        # It should NOT be flagged as a secret
+        assert not is_high_entropy(natural_phrase, threshold=4.0)
+        
+        # A mixed string of similar length SHOULD be flagged
+        mixed_secret = "Ceci_est_un3_l0ngue_phr4se_4v3c_d3s_ch1ffr3s"
+        assert is_high_entropy(mixed_secret, threshold=4.0)
